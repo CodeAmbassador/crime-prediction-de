@@ -93,8 +93,6 @@ class CrimePredictionApp:
             self.classifier = pipeline("zero-shot-classification", model="MoritzLaurer/mDeBERTa-v3-base-mnli-xnli")
             
             # Store categories as dict with separate language keys
-            self.category_descriptions = category_descriptions
-            
             self.candidate_labels = []
             for category_key, descriptions in self.category_descriptions.items():
                 self.candidate_labels.append(f"{category_key.title()}: {descriptions['en']}")
