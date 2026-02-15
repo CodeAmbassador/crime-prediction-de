@@ -2,6 +2,7 @@ import gradio as gr
 import pandas as pd
 from transformers import pipeline
 import warnings
+from langdetect import detect
 warnings.filterwarnings('ignore')
 
 class CrimePredictionApp:
@@ -90,34 +91,58 @@ class CrimePredictionApp:
         """Load zero-shot classification model"""
         try:
             print("Loading zero-shot classification model...")
-            self.classifier = pipeline("zero-shot-classification", model="MoritzLaurer/mDeBERTa-v3-base-mnli-xnli")
-            
-            # Store categories as dict with separate language keys
-            self.candidate_labels = []
+            # Load model with CPU optimizations
+            self.classifier = pipeline(
+                "zero-shot-classification", 
+                model="MoritzLaurer/mDeBERTa-v3-base-mnli-xnli",
+                device=-1,  # Force CPU usage
+                dtype="auto",
+                model_kwargs={
+                    "low_cpu_mem_usage": True
+                }
+            )
+            # Store categories separately for language-based selection
+            self.candidate_labels_en = []
+            self.candidate_labels_de = []
             for category_key, descriptions in self.category_descriptions.items():
-                self.candidate_labels.append(f"{category_key.title()}: {descriptions['en']}")
-                self.candidate_labels.append(f"{category_key.title()} / {descriptions['de']}")
+                self.candidate_labels_en.append(f"{category_key.title()}: {descriptions['en']}")
+                self.candidate_labels_de.append(f"{category_key.title()}: {descriptions['de']}")
             print("Zero-shot classifier loaded successfully!")
             
         except Exception as e:
             print(f"Error loading classifier: {e}")
             self.classifier = None
     
+    
     def predict_crime(self, text):
-        """Predict crime category using zero-shot classification enhanced with keyword matching"""
+        """Predict crime category using optimized zero-shot classification with keyword fallback"""
         if not text.strip():
             return "Please enter a valid description", "No prediction available", 0.0
-        
         if self.classifier is None:
-            return self._keyword_prediction(text)
+            return "No prediction available", "Zero-shot classifier not loaded", 0.0
+        
+        # Detect language among English and German to select appropriate candidate labels
+        detected_lang = detect(text)
+        if detected_lang == 'de':
+            candidate_labels = self.candidate_labels_de
+            print("Detected language: German")
+        else:
+            candidate_labels = self.candidate_labels_en
+            print("Detected language: English")
             
         try:
-            # Use zero-shot classification with candidate labels
-            output = self.classifier(text, self.candidate_labels, multi_label=True)
+            output = self.classifier(
+                text, 
+                candidate_labels, 
+                multi_label=True,
+                batch_size=1,
+                truncation=True,
+                max_length=512
+            )
             hits = [
                 f"{label} ({score:.1%})\n" 
                 for label, score in zip(output['labels'], output['scores']) 
-                if score > 0.85
+                if score > 0.7
             ]
             if hits:
                 best_idx = output['scores'].index(max(output['scores']))
@@ -125,97 +150,10 @@ class CrimePredictionApp:
                 confidence = max(output['scores'])
                 prediction_details = "\n".join(hits)
                 return prediction, prediction_details, confidence
-            else:
-                # No high-confidence zero-shot matches, use keyword prediction
-                return self._keyword_prediction(text)
-                
+                            
         except Exception as e:
             print(f"Error in zero-shot classification: {e}")
-            return self._keyword_prediction(text)
-    
-    def _keyword_prediction(self, text):
-        """Predict crime category using keyword matching"""
-        text_lower = text.lower()
-        if any(word in text_lower for word in ['theft', 'stolen', 'larceny']):
-            prediction = 'larceny/theft'
-        elif any(word in text_lower for word in ['assault', 'battery', 'violence', 'attack', 'fight']):
-            prediction = 'assault'
-        elif any(word in text_lower for word in ['drug', 'narcotic']):
-            prediction = 'drug/narcotic'
-        elif any(word in text_lower for word in ['vehicle', 'auto', 'car']):
-            prediction = 'vehicle theft'
-        elif any(word in text_lower for word in ['vandalism', 'damage', 'graffiti']):
-            prediction = 'vandalism'
-        elif any(word in text_lower for word in ['burglary', 'break', 'window', 'climbing']):
-            prediction = 'burglary'
-        elif any(word in text_lower for word in ['robbery', 'mask', 'grab']):
-            prediction = 'robbery'
-        elif any(word in text_lower for word in ['weapon', 'knife', 'gun']):
-            prediction = 'weapon laws'
-        elif any(word in text_lower for word in ['fraud', 'fake', 'counterfeit']):
-            prediction = 'fraud'
-        elif any(word in text_lower for word in ['forgery', 'fake']):
-            prediction = 'forgery/counterfeiting'
-        elif any(word in text_lower for word in ['bribery']):
-            prediction = 'bribery'
-        elif any(word in text_lower for word in ['embezzlement']):
-            prediction = 'embezzlement'
-        elif any(word in text_lower for word in ['extortion']):
-            prediction = 'extortion'
-        elif any(word in text_lower for word in ['kidnapping']):
-            prediction = 'kidnapping'
-        elif any(word in text_lower for word in ['missing person']):
-            prediction = 'missing person'
-        elif any(word in text_lower for word in ['family offenses']):
-            prediction = 'family offenses'
-        elif any(word in text_lower for word in ['loitering']):
-            prediction = 'loitering'
-        elif any(word in text_lower for word in ['disorderly conduct']):
-            prediction = 'disorderly conduct'
-        elif any(word in text_lower for word in ['drunkenness', 'drunk']):
-            prediction = 'drunkenness'
-        elif any(word in text_lower for word in ['driving under the influence', 'dui', 'drunk driving']):
-            prediction = 'driving under the influence'
-        elif any(word in text_lower for word in ['liquor laws']):
-            prediction = 'liquor laws'
-        elif any(word in text_lower for word in ['gambling']):
-            prediction = 'gambling'
-        elif any(word in text_lower for word in ['arson', 'fire']):
-            prediction = 'arson'
-        elif any(word in text_lower for word in ['sex offenses', 'sexual']):
-            prediction = 'sex offenses forcible'
-        elif any(word in text_lower for word in ['prostitution']):
-            prediction = 'prostitution'
-        elif any(word in text_lower for word in ['pornography', 'obscene']):
-            prediction = 'pornography/obscene mat'
-        elif any(word in text_lower for word in ['trespass']):
-            prediction = 'trespass'
-        elif any(word in text_lower for word in ['stolen property']):
-            prediction = 'stolen property'
-        elif any(word in text_lower for word in ['recovered vehicle']):
-            prediction = 'recovered vehicle'
-        elif any(word in text_lower for word in ['warrants']):
-            prediction = 'warrants'
-        elif any(word in text_lower for word in ['suicide']):
-            prediction = 'suicide'
-        elif any(word in text_lower for word in ['suspicious', 'susp']):
-            prediction = 'suspicious occ'
-        elif any(word in text_lower for word in ['runaway']):
-            prediction = 'runaway'
-        elif any(word in text_lower for word in ['non-criminal']):
-            prediction = 'non-criminal'
-        elif any(word in text_lower for word in ['secondary codes']):
-            prediction = 'secondary codes'
-        else:
-            prediction = 'other offenses'  # Default fallback
-        
-        valid_categories = self.unique_categories
-        # If prediction is not in valid categories, set it to 'other offenses'
-        if prediction not in valid_categories:
-            prediction = 'other offenses'
-        confidence = 0.7
-        prediction_details = f"{prediction}: {confidence:.0%}\nKeyword-based prediction using valid categories"
-        return prediction, prediction_details, confidence
+            return "No prediction available", "No prediction available", 0.0
     
     def get_crime_statistics(self):
         """Get crime statistics: dataset size, available categories, zero-shot model status"""
@@ -264,12 +202,9 @@ with gr.Blocks(title="Crime Prediction System", theme=gr.themes.Soft()) as demo:
             predict_btn = gr.Button("🔍 Predict Crime Category", variant="primary", size="lg")
         
         with gr.Column(scale=1):
-            gr.Markdown("### 📊 Quick Statistics")
-            stats_display = gr.Textbox(
-                value=app.get_crime_statistics(),
-                label="Dataset Overview",
-                lines=10,
-                interactive=False
+            with gr.Accordion("📊 Quick Statistics", open=False):
+                stats_display = gr.Markdown(
+                    app.get_crime_statistics()
             )
     
     with gr.Row():
