@@ -313,14 +313,8 @@ with gr.Blocks(title="Crime Prediction System", theme=gr.themes.Soft()) as demo:
         ],
         inputs=input_text,
         outputs=[prediction_output, details_output, confidence_output],
-        fn=predict_interface
-    )
-    
-    # Event handlers
-    predict_btn.click(
         fn=predict_interface,
-        inputs=input_text,
-        outputs=[prediction_output, details_output, confidence_output]
+        examples_per_page=100
     )
     
     input_text.submit(
